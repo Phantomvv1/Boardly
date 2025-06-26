@@ -147,26 +147,16 @@ func (c *Client) ReadMessage(ws *websocket.Conn) {
 
 func (c *Client) WriteBoard(ws *websocket.Conn) {
 	for sendBoard := range c.sendBoard {
-		idBoard := []byte{}
-		pointsBoard := []byte{}
-		for _, client := range RunningBoard.Board {
-			idBuf := make([]byte, 8)
-			binary.BigEndian.AppendUint64(idBuf, client.ID)
-			idBoard = append(idBoard, idBuf...)
+		boardData := []byte{}
+		for _, client := range sendBoard {
+			buf := make([]byte, 16)
+			binary.BigEndian.PutUint64(buf[:8], client.ID)
+			binary.BigEndian.PutUint64(buf[8:], client.Points)
 
-			pointsBuf := make([]byte, 8)
-			binary.BigEndian.AppendUint64(pointsBuf, client.Points)
-			pointsBoard = append(pointsBoard, pointsBuf...)
+			boardData = append(boardData, buf...)
 		}
 
-		err := ws.WriteMessage(websocket.BinaryMessage, idBoard)
-		if err != nil {
-			log.Println(err)
-			c.ws.Close()
-			return
-		}
-
-		err = ws.WriteMessage(websocket.BinaryMessage, pointsBoard)
+		err := ws.WriteMessage(websocket.BinaryMessage, boardData)
 		if err != nil {
 			log.Println(err)
 			c.ws.Close()
@@ -222,5 +212,5 @@ func InsertIntoBoard(client *Client, index int) {
 		return
 	}
 
-	RunningBoard.Board = append(RunningBoard.Board[:index], append([]*Client{client}, RunningBoard.Board[index+1:]...)...)
+	RunningBoard.Board = append(RunningBoard.Board[:index], append([]*Client{client}, RunningBoard.Board[index:]...)...)
 }
