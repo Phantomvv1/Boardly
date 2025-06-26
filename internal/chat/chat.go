@@ -35,6 +35,12 @@ type BoardHub struct {
 	Boradcast chan []byte
 }
 
+func NewBoardHub() *BoardHub {
+	return &BoardHub{
+		Boradcast: make(chan []byte),
+	}
+}
+
 func NewBoard() *Board {
 	return &Board{
 		Board:  make([]*Client, 0),
@@ -112,7 +118,6 @@ func Chat(c *gin.Context) {
 	go client.WriteMessage(ws)
 	go client.ReadMessage(ws)
 	go client.WriteBoard(ws)
-	go client.ReadBoard(ws)
 }
 
 func (c *Client) WriteMessage(ws *websocket.Conn) {
@@ -163,10 +168,6 @@ func (c *Client) WriteBoard(ws *websocket.Conn) {
 			return
 		}
 	}
-}
-
-func (c *Client) ReadBoard(ws *websocket.Conn) {
-
 }
 
 func (c *Client) UpdatePoints(points uint64) {
