@@ -1,16 +1,22 @@
 package chat
 
 import (
+	"encoding/binary"
 	"log"
 	"net/http"
+	"slices"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
 type Client struct {
-	ws   *websocket.Conn
-	send chan []byte
+	ID        uint64 `json:"id"`
+	Points    uint64 `json:"points"`
+	ws        *websocket.Conn
+	send      chan []byte
+	sendBoard chan []*Client
 }
 
 type Hub struct {
@@ -18,6 +24,22 @@ type Hub struct {
 	Clients           map[*Client]bool //all of the clients I already have
 	RegisteringClient chan *Client     //a new client
 	UnregisterClient  chan *Client     //when a client disconnects
+}
+
+type Board struct {
+	Board  []*Client
+	Change chan bool
+}
+
+type BoardHub struct {
+	Boradcast chan []byte
+}
+
+func NewBoard() *Board {
+	return &Board{
+		Board:  make([]*Client, 0),
+		Change: make(chan bool),
+	}
 }
 
 func NewHub() *Hub {
@@ -54,12 +76,22 @@ func (h *Hub) Run() {
 	}
 }
 
+func (b *Board) Run() {
+	for change := range b.Change {
+		if change {
+		}
+	}
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
 
+var mu = &sync.Mutex{}
 var RunningHub = NewHub()
+var ClientsNumber uint64 = 0
+var RunningBoard = NewBoard()
 
 func Chat(c *gin.Context) {
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -69,11 +101,18 @@ func Chat(c *gin.Context) {
 		return
 	}
 
-	client := &Client{ws: ws, send: make(chan []byte)}
+	mu.Lock()
+	ClientsNumber++
+	mu.Unlock()
+
+	client := &Client{ID: ClientsNumber, ws: ws, send: make(chan []byte), Points: 0, sendBoard: make(chan []*Client)}
+	RunningBoard.Board = append(RunningBoard.Board, client)
 	RunningHub.RegisteringClient <- client
 
 	go client.WriteMessage(ws)
 	go client.ReadMessage(ws)
+	go client.WriteBoard(ws)
+	go client.ReadBoard(ws)
 }
 
 func (c *Client) WriteMessage(ws *websocket.Conn) {
@@ -99,6 +138,89 @@ func (c *Client) ReadMessage(ws *websocket.Conn) {
 			return
 		}
 
+		c.UpdatePoints(uint64(len(message)))
+		UpdateBoard(c)
+
 		RunningHub.Broadcast <- message
 	}
+}
+
+func (c *Client) WriteBoard(ws *websocket.Conn) {
+	for sendBoard := range c.sendBoard {
+		idBoard := []byte{}
+		pointsBoard := []byte{}
+		for _, client := range RunningBoard.Board {
+			idBuf := make([]byte, 8)
+			binary.BigEndian.AppendUint64(idBuf, client.ID)
+			idBoard = append(idBoard, idBuf...)
+
+			pointsBuf := make([]byte, 8)
+			binary.BigEndian.AppendUint64(pointsBuf, client.Points)
+			pointsBoard = append(pointsBoard, pointsBuf...)
+		}
+
+		err := ws.WriteMessage(websocket.BinaryMessage, idBoard)
+		if err != nil {
+			log.Println(err)
+			c.ws.Close()
+			return
+		}
+
+		err = ws.WriteMessage(websocket.BinaryMessage, pointsBoard)
+		if err != nil {
+			log.Println(err)
+			c.ws.Close()
+			return
+		}
+	}
+}
+
+func (c *Client) ReadBoard(ws *websocket.Conn) {
+
+}
+
+func (c *Client) UpdatePoints(points uint64) {
+	c.Points += points
+}
+
+func GetClientID(c *gin.Context) {
+	mu.Lock()
+	defer mu.Unlock()
+	c.JSON(http.StatusOK, gin.H{"id": ClientsNumber})
+}
+
+func BoardStatus(c *gin.Context) {
+
+}
+
+func UpdateBoard(client *Client) {
+	clientIndex := slices.Index(RunningBoard.Board, client)
+
+	change := 0
+	for i := clientIndex; i >= 1; i-- {
+		if client.Points >= RunningBoard.Board[i-1].Points {
+			change++
+		}
+	}
+
+	if change != 0 {
+		RemoveFromBoard(clientIndex)
+		InsertIntoBoard(client, clientIndex-change)
+	}
+}
+
+func RemoveFromBoard(index int) {
+	RunningBoard.Board = append(RunningBoard.Board[:index], RunningBoard.Board[index+1:]...)
+}
+
+func InsertIntoBoard(client *Client, index int) {
+	if index == 0 {
+		RunningBoard.Board = append([]*Client{client}, RunningBoard.Board...)
+		return
+	} else if index == len(RunningBoard.Board) {
+		RunningBoard.Board = append(RunningBoard.Board, client)
+		return
+	}
+
+	RunningBoard.Board = append(RunningBoard.Board[:index], append([]*Client{client}, RunningBoard.Board[index+1:]...)...)
 }
