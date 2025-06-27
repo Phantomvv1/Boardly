@@ -87,7 +87,7 @@ func (h *Hub) Run() {
 
 func (b *Board) TransformToBytes() []byte {
 	boardData := []byte{}
-	for _, client := range RunningBoard.Board {
+	for _, client := range b.Board {
 		buf := make([]byte, 16)
 		binary.BigEndian.PutUint64(buf[:8], client.ID)
 		binary.BigEndian.PutUint64(buf[8:], client.Points)
