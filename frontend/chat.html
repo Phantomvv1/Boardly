@@ -12,8 +12,31 @@
 			padding: 0;
 			background: #f9f9f9;
 			display: flex;
-			flex-direction: column;
+			flex-direction: row;
 			height: 100vh;
+		}
+
+		#chat-container {
+			display: flex;
+			flex-direction: column;
+			flex: 3;
+			border-right: 1px solid #ccc;
+			height: 100vh;
+		}
+
+		#leaderboard {
+			flex: 1;
+			padding: 1rem;
+			background: #f0f0f0;
+			overflow-y: auto;
+			height: 100vh;
+			min-width: 250px;
+		}
+
+		#leaderboard h3 {
+			margin-top: 0;
+			border-bottom: 1px solid #ccc;
+			padding-bottom: 0.5rem;
 		}
 
 		#chat {
@@ -59,51 +82,160 @@
 			border-radius: 4px;
 			word-wrap: break-word;
 		}
+
+		.msg.self {
+			background: #d2f8d2;
+			font-weight: bold;
+		}
+
+		li.self {
+			font-weight: bold;
+			background: #e0ffe0;
+			border-radius: 4px;
+			padding: 2px 4px;
+		}
 	</style>
 </head>
 
 <body>
-	<div id="chat"></div>
-	<form id="form">
-		<input id="input" type="text" autocomplete="off" placeholder="Message" required />
-		<button id="send" type="submit">Send</button>
-	</form>
+	<div id="chat-container">
+		<div id="chat"></div>
+		<form id="form">
+			<input id="input" type="text" autocomplete="off" placeholder="Message" required />
+			<button id="send" type="submit">Send</button>
+		</form>
+	</div>
+
+	<div id="leaderboard">
+		<h3>Leaderboard</h3>
+		<ul id="board"></ul>
+	</div>
 
 	<script>
 		const chat = document.getElementById("chat");
 		const form = document.getElementById("form");
 		const input = document.getElementById("input");
+		const board = document.getElementById("board");
 
-		// Connect to the WebSocket server
-		const socket = new WebSocket("ws://localhost:42069/ws/chat");
+		let clientID = null;
+		let socket = null;
 
-		socket.addEventListener("open", () => {
-			console.log("Connected to WebSocket server.");
-		});
+		async function init() {
+			try {
+				// 1. Connect to WebSocket first
+				socket = new WebSocket("ws://localhost:42069/ws/chat");
+				socket.binaryType = "Blob";
 
-		socket.addEventListener("message", (event) => {
-			const msg = document.createElement("div");
-			msg.className = "msg";
-			msg.textContent = event.data;
-			chat.appendChild(msg);
-			chat.scrollTop = chat.scrollHeight;
-		});
+				socket.addEventListener("open", async () => {
+					console.log("Connected to WebSocket server.");
 
-		socket.addEventListener("close", () => {
-			const msg = document.createElement("div");
-			msg.className = "msg";
-			msg.style.color = "red";
-			msg.textContent = "[Disconnected from server]";
-			chat.appendChild(msg);
-		});
+					// 2. Fetch client ID after connecting to WS
+					try {
+						const res = await fetch("/id");
+						if (!res.ok) throw new Error("Failed to fetch client ID");
 
-		form.addEventListener("submit", (e) => {
-			e.preventDefault();
-			if (input.value && socket.readyState === WebSocket.OPEN) {
-				socket.send(input.value);
-				input.value = "";
+						const json = await res.json(); // Parse JSON properly
+						if (typeof json.id !== "number" && typeof json.id !== "string") {
+							throw new Error("Invalid ID format in JSON");
+						}
+
+						clientID = BigInt(json.id); // Convert to BigInt
+						console.log("Client ID is", clientID);
+					} catch (err) {
+						console.error("Failed to get ID:", err);
+						alert("Could not get client ID.");
+					}
+				});
+
+				// 3. Handle messages
+				socket.addEventListener("message", (event) => {
+					console.log("Received:", event.data);
+					if (typeof event.data === "string") {
+						try {
+							const msg = document.createElement("div");
+							msg.className = "msg";
+
+							const [sender, ...rest] = event.data.split(": ");
+							const content = rest.join(": ");
+
+							let senderID;
+							try {
+								senderID = BigInt(sender.trim());
+							} catch (e) {
+								console.warn("Invalid sender ID received:", sender);
+								msg.textContent = `[Unknown sender]: ${event.data}`;
+								chat.appendChild(msg);
+								chat.scrollTop = chat.scrollHeight;
+								return;
+							}
+
+							msg.textContent = `${senderID}: ${content}`;
+							if (clientID && senderID === clientID) {
+								msg.classList.add("self");
+							}
+
+							chat.appendChild(msg);
+							chat.scrollTop = chat.scrollHeight;
+						} catch (err) {
+							console.error("Error while processing message:", err);
+						}
+					} else if (event.data instanceof Blob) {
+						console.log("IT WENT IN")
+						var reader = new FileReader();
+						reader.readAsArrayBuffer(evt.data);
+						reader.addEventListener("loadend", function (e) {
+							buffer = new Uint16Array(e.target.result);  // arraybuffer object
+						});
+
+						console.log(Array.prototype.slice.call(buffer.slice()));
+
+						// Binary leaderboard update
+						const data = new DataView(event.data);
+						const clients = [];
+						for (let i = 0; i < data.byteLength; i += 16) {
+							const id = data.getBigUint64(i, false);      // big endian
+							const points = data.getBigUint64(i + 8, false);
+							clients.push({id, points});
+						}
+
+						// Update leaderboard UI
+						board.innerHTML = "";
+						clients.forEach(client => {
+							const li = document.createElement("li");
+							li.textContent = `Client ${client.id} — ${client.points} pts`;
+							if (clientID && client.id === clientID) {
+								li.classList.add("self");
+							}
+							board.appendChild(li);
+						});
+					} else if (event.data instanceof ArrayBuffer) {
+						console.log("IT WENT IN AS ARRAY");
+					}
+				});
+
+				socket.addEventListener("close", () => {
+					const msg = document.createElement("div");
+					msg.className = "msg";
+					msg.style.color = "red";
+					msg.textContent = "[Disconnected from server]";
+					chat.appendChild(msg);
+				});
+
+				// 4. Send chat messages
+				form.addEventListener("submit", (e) => {
+					e.preventDefault();
+					if (input.value && socket.readyState === WebSocket.OPEN) {
+						socket.send(input.value);
+						input.value = "";
+					}
+				});
+			} catch (err) {
+				console.error("Init error:", err);
+				alert("Failed to initialize: " + err.message);
 			}
-		});
+		}
+
+		init();
 	</script>
 </body>
 

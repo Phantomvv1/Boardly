@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"time"
 
-	. "github.com/Phantomvv1/Boardly/internal/board"
 	. "github.com/Phantomvv1/Boardly/internal/chat"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -25,7 +24,6 @@ func main() {
 
 	r.Any("/", func(c *gin.Context) { c.JSON(http.StatusOK, nil) })
 	r.GET("/ws/chat", Chat)
-	r.GET("/ws/board", UpdateBoard)
 	r.GET("/id", GetClientID)
 	r.Static("/chat", "../../frontend")
 

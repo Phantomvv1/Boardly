@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log"
 	"net/http"
 	"slices"
@@ -16,7 +17,7 @@ type Client struct {
 	Points    uint64 `json:"points"`
 	ws        *websocket.Conn
 	send      chan []byte
-	sendBoard chan []*Client
+	sendBoard chan []byte
 }
 
 type Hub struct {
@@ -24,27 +25,16 @@ type Hub struct {
 	Clients           map[*Client]bool //all of the clients I already have
 	RegisteringClient chan *Client     //a new client
 	UnregisterClient  chan *Client     //when a client disconnects
+	BoradcastBoard    chan []byte
 }
 
 type Board struct {
-	Board  []*Client
-	Change chan bool
-}
-
-type BoardHub struct {
-	Boradcast chan []byte
-}
-
-func NewBoardHub() *BoardHub {
-	return &BoardHub{
-		Boradcast: make(chan []byte),
-	}
+	Board []*Client
 }
 
 func NewBoard() *Board {
 	return &Board{
-		Board:  make([]*Client, 0),
-		Change: make(chan bool),
+		Board: make([]*Client, 0),
 	}
 }
 
@@ -75,6 +65,18 @@ func (h *Hub) Run() {
 				default:
 					delete(h.Clients, client)
 					close(client.send)
+					close(client.sendBoard)
+					client = nil
+				}
+			}
+		case board := <-h.BoradcastBoard:
+			for client := range h.Clients {
+				select {
+				case client.sendBoard <- board:
+				default:
+					delete(h.Clients, client)
+					close(client.send)
+					close(client.sendBoard)
 					client = nil
 				}
 			}
@@ -82,11 +84,17 @@ func (h *Hub) Run() {
 	}
 }
 
-func (b *Board) Run() {
-	for change := range b.Change {
-		if change {
-		}
+func (b *Board) TransformToBytes() []byte {
+	boardData := []byte{}
+	for _, client := range RunningBoard.Board {
+		buf := make([]byte, 16)
+		binary.BigEndian.PutUint64(buf[:8], client.ID)
+		binary.BigEndian.PutUint64(buf[8:], client.Points)
+
+		boardData = append(boardData, buf...)
 	}
+
+	return boardData
 }
 
 var upgrader = websocket.Upgrader{
@@ -111,7 +119,7 @@ func Chat(c *gin.Context) {
 	ClientsNumber++
 	mu.Unlock()
 
-	client := &Client{ID: ClientsNumber, ws: ws, send: make(chan []byte), Points: 0, sendBoard: make(chan []*Client)}
+	client := &Client{ID: ClientsNumber, ws: ws, send: make(chan []byte), Points: 0, sendBoard: make(chan []byte)}
 	RunningBoard.Board = append(RunningBoard.Board, client)
 	RunningHub.RegisteringClient <- client
 
@@ -146,21 +154,15 @@ func (c *Client) ReadMessage(ws *websocket.Conn) {
 		c.UpdatePoints(uint64(len(message)))
 		UpdateBoard(c)
 
+		message = append([]byte(fmt.Sprintf("%d: ", c.ID)), message...)
+
 		RunningHub.Broadcast <- message
+		RunningHub.BoradcastBoard <- RunningBoard.TransformToBytes()
 	}
 }
 
 func (c *Client) WriteBoard(ws *websocket.Conn) {
-	for sendBoard := range c.sendBoard {
-		boardData := []byte{}
-		for _, client := range sendBoard {
-			buf := make([]byte, 16)
-			binary.BigEndian.PutUint64(buf[:8], client.ID)
-			binary.BigEndian.PutUint64(buf[8:], client.Points)
-
-			boardData = append(boardData, buf...)
-		}
-
+	for boardData := range c.sendBoard {
 		err := ws.WriteMessage(websocket.BinaryMessage, boardData)
 		if err != nil {
 			log.Println(err)
@@ -178,10 +180,6 @@ func GetClientID(c *gin.Context) {
 	mu.Lock()
 	defer mu.Unlock()
 	c.JSON(http.StatusOK, gin.H{"id": ClientsNumber})
-}
-
-func BoardStatus(c *gin.Context) {
-
 }
 
 func UpdateBoard(client *Client) {
