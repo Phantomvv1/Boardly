@@ -103,6 +103,7 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+var muID = &sync.Mutex{}
 var mu = &sync.Mutex{}
 var RunningHub = NewHub()
 var ClientsNumber uint64 = 0
@@ -116,9 +117,9 @@ func Chat(c *gin.Context) {
 		return
 	}
 
-	mu.Lock()
+	muID.Lock()
 	ClientsNumber++
-	mu.Unlock()
+	muID.Unlock()
 
 	client := &Client{ID: ClientsNumber, ws: ws, send: make(chan []byte), Points: 0, sendBoard: make(chan []byte)}
 	RunningBoard.Board = append(RunningBoard.Board, client)
@@ -131,7 +132,9 @@ func Chat(c *gin.Context) {
 
 func (c *Client) WriteMessage(ws *websocket.Conn) {
 	for send := range c.send {
+		mu.Lock()
 		err := c.ws.WriteMessage(websocket.TextMessage, send)
+		mu.Unlock()
 		if err != nil {
 			log.Println(err)
 			c.ws.Close()
@@ -164,7 +167,9 @@ func (c *Client) ReadMessage(ws *websocket.Conn) {
 
 func (c *Client) WriteBoard(ws *websocket.Conn) {
 	for boardData := range c.sendBoard {
-		err := ws.WriteMessage(websocket.BinaryMessage, boardData)
+		mu.Lock()
+		err := c.ws.WriteMessage(websocket.BinaryMessage, boardData)
+		mu.Unlock()
 		if err != nil {
 			log.Println(err)
 			c.ws.Close()

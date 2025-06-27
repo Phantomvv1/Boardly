@@ -180,34 +180,37 @@
 							console.error("Error while processing message:", err);
 						}
 					} else if (event.data instanceof Blob) {
-						console.log("IT WENT IN")
-						var reader = new FileReader();
-						reader.readAsArrayBuffer(evt.data);
-						reader.addEventListener("loadend", function (e) {
-							buffer = new Uint16Array(e.target.result);  // arraybuffer object
-						});
+						console.log("Received binary Blob");
 
-						console.log(Array.prototype.slice.call(buffer.slice()));
+						const reader = new FileReader();
+						reader.readAsArrayBuffer(event.data);
 
-						// Binary leaderboard update
-						const data = new DataView(event.data);
-						const clients = [];
-						for (let i = 0; i < data.byteLength; i += 16) {
-							const id = data.getBigUint64(i, false);      // big endian
-							const points = data.getBigUint64(i + 8, false);
-							clients.push({id, points});
-						}
-
-						// Update leaderboard UI
-						board.innerHTML = "";
-						clients.forEach(client => {
-							const li = document.createElement("li");
-							li.textContent = `Client ${client.id} — ${client.points} pts`;
-							if (clientID && client.id === clientID) {
-								li.classList.add("self");
+						reader.onloadend = function () {
+							const buffer = reader.result;
+							if (!(buffer instanceof ArrayBuffer)) {
+								console.error("Invalid buffer received.");
+								return;
 							}
-							board.appendChild(li);
-						});
+
+							const data = new DataView(buffer);
+							const clients = [];
+							for (let i = 0; i < data.byteLength; i += 16) {
+								const id = data.getBigUint64(i, false);      // big endian
+								const points = data.getBigUint64(i + 8, false);
+								clients.push({id, points});
+							}
+
+							// Update leaderboard UI
+							board.innerHTML = "";
+							clients.forEach(client => {
+								const li = document.createElement("li");
+								li.textContent = `Client ${client.id} — ${client.points} pts`;
+								if (clientID && client.id === clientID) {
+									li.classList.add("self");
+								}
+								board.appendChild(li);
+							});
+						};
 					} else if (event.data instanceof ArrayBuffer) {
 						console.log("IT WENT IN AS ARRAY");
 					}
