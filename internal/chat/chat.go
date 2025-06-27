@@ -44,6 +44,7 @@ func NewHub() *Hub {
 		Clients:           make(map[*Client]bool),
 		RegisteringClient: make(chan *Client),
 		UnregisterClient:  make(chan *Client),
+		BoradcastBoard:    make(chan []byte),
 	}
 }
 
